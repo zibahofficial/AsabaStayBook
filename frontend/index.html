@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+
+  <title>
+    AsabaStayBook — Hospitality Booking Desk
+  </title>
+
+  <link
+    rel="stylesheet"
+    href="/assets/../css/style.css"
+  >
+
+</head>
+
+
+<body>
+
+
+<div
+  id="loginView"
+  class="login-wrap"
+>
+
+
+  <div class="login-card">
+
+    <div class="brand-mark">
+      AS
+    </div>
+
+    <p class="eyebrow">
+      ASABA HOSPITALITY DESK
+    </p>
+
+
+    <h1>
+      Keep every booking in one place.
+    </h1>
+
+
+    <p class="muted">
+      Prevent double bookings, record deposits
+      and know what is still outstanding.
+    </p>
+
+
+    <!-- SIGN IN -->
+
+    <div id="signInPanel">
+
+      <h2>
+        Sign in
+      </h2>
+
+      <p class="muted">
+        Access your AsabaStayBook account.
+      </p>
+
+
+      <form id="loginForm">
+
+        <label>
+          Email
+
+          <input
+            id="email"
+            type="email"
+            placeholder="you@example.com"
+            required
+          >
+
+        </label>
+
+
+        <label>
+          Password
+
+          <input
+            id="password"
+            type="password"
+            placeholder="Enter your password"
+            required
+          >
+
+        </label>
+
+
+        <button
+          class="btn primary"
+          type="submit"
+        >
+          Sign in
+        </button>
+
+
+        <p
+          id="loginError"
+          class="error"
+        ></p>
+
+      </form>
+
+
+      <p class="auth-switch">
+
+        Don't have an account?
+
+        <button
+          type="button"
+          id="showRegister"
+          class="link-btn"
+        >
+          Create an account
+        </button>
+
+      </p>
+
+    </div>
+
+
+    <!-- REGISTER -->
+
+    <div
+      id="registerPanel"
+      class="hidden"
+    >
+
+      <h2>
+        Create your account
+      </h2>
+
+      <p class="muted">
+        Choose how you will use AsabaStayBook.
+      </p>
+
+
+      <form id="registerForm">
+
+
+        <label>
+          Email
+
+          <input
+            id="registerEmail"
+            type="email"
+            placeholder="you@example.com"
+            required
+          >
+
+        </label>
+
+
+        <label>
+          Password
+
+          <input
+            id="registerPassword"
+            type="password"
+            placeholder="At least 8 characters"
+            minlength="8"
+            required
+          >
+
+        </label>
+
+
+        <label>
+          Confirm password
+
+          <input
+            id="registerConfirmPassword"
+            type="password"
+            placeholder="Enter password again"
+            minlength="8"
+            required
+          >
+
+        </label>
+
+
+        <label>
+          Account type
+
+          <select
+            id="registerRole"
+            required
+          >
+
+            <option
+              value=""
+            >
+              Select account type
+            </option>
+
+            <option
+              value="customer"
+            >
+              Customer
+            </option>
+
+            <option
+              value="owner"
+            >
+              Property Owner / Manager
+            </option>
+
+          </select>
+
+        </label>
+
+
+        <button
+          class="btn primary"
+          type="submit"
+        >
+          Create account
+        </button>
+
+
+        <p
+          id="registerError"
+          class="error"
+        ></p>
+
+      </form>
+
+
+      <p class="auth-switch">
+
+        Already have an account?
+
+        <button
+          type="button"
+          id="showLogin"
+          class="link-btn"
+        >
+          Sign in
+        </button>
+
+      </p>
+
+    </div>
+
+  </div>
+
+
+  <div class="login-photo">
+
+    <img
+      src="https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=1600&q=85"
+      alt="Elegant event centre interior"
+    >
+
+    <div>
+
+      <span>
+        Built for Asaba
+      </span>
+
+      <strong>
+        Hotels · Shortlets · Event Centres
+      </strong>
+
+    </div>
+
+  </div>
+
+
+</div>
+
+
+
+<div
+  id="app"
+  class="hidden"
+>
+
+
+  <aside class="sidebar">
+
+
+    <div class="logo">
+
+      <span>
+        AS
+      </span>
+
+      <div>
+        AsabaStay<strong>Book</strong>
+      </div>
+
+    </div>
+
+
+    <p class="side-label">
+      WORKSPACE
+    </p>
+
+
+    <button
+      class="nav active"
+      data-view="dashboard"
+    >
+      Overview
+    </button>
+
+
+    <button
+      class="nav"
+      data-view="calendar"
+    >
+      Booking calendar
+    </button>
+
+
+    <button
+      class="nav"
+      data-view="bookings"
+    >
+      Bookings
+    </button>
+
+
+    <button
+      class="nav"
+      data-view="properties"
+    >
+      Properties
+    </button>
+
+
+    <div class="side-bottom">
+
+
+      <div class="user-chip">
+
+        <div class="avatar">
+          A
+        </div>
+
+        <div>
+
+          <b id="currentUserRole">
+            User
+          </b>
+
+          <small>
+            AsabaStayBook
+          </small>
+
+        </div>
+
+      </div>
+
+
+      <button
+        id="logout"
+        class="nav"
+      >
+        Sign out
+      </button>
+
+
+    </div>
+
+  </aside>
+
+
+  <main>
+
+
+    <header class="topbar">
+
+      <div>
+
+        <p class="eyebrow">
+          ASABA, DELTA STATE
+        </p>
+
+        <h2 id="pageTitle">
+          Overview
+        </h2>
+
+      </div>
+
+
+      <button
+        class="btn primary"
+        id="newBooking"
+      >
+        + New booking
+      </button>
+
+    </header>
+
+
+    <section id="content"></section>
+
+
+  </main>
+
+
+</div>
+
+
+
+<div
+  id="modal"
+  class="modal hidden"
+>
+
+
+  <div class="modal-card">
+
+
+    <div class="modal-head">
+
+      <div>
+
+        <p class="eyebrow">
+          BOOKING
+        </p>
+
+        <h3>
+          Create booking
+        </h3>
+
+      </div>
+
+
+      <button
+        id="closeModal"
+        class="icon-btn"
+      >
+        ×
+      </button>
+
+    </div>
+
+
+    <form
+      id="bookingForm"
+      class="form-grid"
+    >
+
+
+      <label>
+
+        Property
+
+        <select
+          id="propertyId"
+          required
+        ></select>
+
+      </label>
+
+
+      <label>
+
+        Customer name
+
+        <input
+          id="customerName"
+          required
+        >
+
+      </label>
+
+
+      <label>
+
+        Phone
+
+        <input
+          id="customerPhone"
+          required
+        >
+
+      </label>
+
+
+      <label>
+
+        Start
+
+        <input
+          id="startAt"
+          type="datetime-local"
+          required
+        >
+
+      </label>
+
+
+      <label>
+
+        End
+
+        <input
+          id="endAt"
+          type="datetime-local"
+          required
+        >
+
+      </label>
+
+
+      <label>
+
+        Total amount (₦)
+
+        <input
+          id="totalAmount"
+          type="number"
+          min="0"
+          required
+        >
+
+      </label>
+
+
+      <label>
+
+        Deposit paid (₦)
+
+        <input
+          id="depositAmount"
+          type="number"
+          min="0"
+          value="0"
+          required
+        >
+
+      </label>
+
+
+      <label>
+
+        Status
+
+        <select id="status">
+
+          <option value="confirmed">
+            Confirmed
+          </option>
+
+          <option value="pending">
+            Pending
+          </option>
+
+        </select>
+
+      </label>
+
+
+      <label class="full">
+
+        Expiry (only for pending)
+
+        <input
+          id="expiresAt"
+          type="datetime-local"
+        >
+
+      </label>
+
+
+      <label class="full">
+
+        Notes
+
+        <textarea
+          id="notes"
+          rows="3"
+          placeholder="Payment reference, event details, etc."
+        ></textarea>
+
+      </label>
+
+
+      <div class="full modal-actions">
+
+        <button
+          type="button"
+          id="cancelModal"
+          class="btn ghost"
+        >
+          Cancel
+        </button>
+
+
+        <button
+          class="btn primary"
+          type="submit"
+        >
+          Save booking
+        </button>
+
+      </div>
+
+
+      <p
+        id="formError"
+        class="error full"
+      ></p>
+
+
+    </form>
+
+  </div>
+
+</div>
+
+
+
+<script src="/assets/../js/app.js"></script>
+
+</body>
+
+</html>
