@@ -113,13 +113,29 @@ app.add_middleware(
 # STATIC FILES
 # =========================================================
 
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+
+app.mount(
+    "/css",
+    StaticFiles(directory=FRONTEND_DIR / "css"),
+    name="css",
+)
+
+app.mount(
+    "/js",
+    StaticFiles(directory=FRONTEND_DIR / "js"),
+    name="js",
+)
+
 app.mount(
     "/assets",
-    StaticFiles(
-        directory="frontend/assets"
-    ),
+    StaticFiles(directory=FRONTEND_DIR / "assets"),
     name="assets",
 )
+
 
 
 # =========================================================
@@ -676,8 +692,8 @@ def dashboard(
 # FRONTEND
 # =========================================================
 
-@app.get("/")
+    @app.get("/")
 def home():
     return FileResponse(
-        "frontend/index.html"
+        FRONTEND_DIR / "index.html"
     )
