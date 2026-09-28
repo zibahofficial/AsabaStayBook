@@ -692,7 +692,7 @@ def dashboard(
 # FRONTEND
 # =========================================================
 
-    @app.get("/")
+@app.get("/")
 def home():
     return FileResponse(
         FRONTEND_DIR / "index.html"
