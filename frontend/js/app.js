@@ -32,7 +32,38 @@ const api = async (path, options = {}) => {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.detail || 'Request failed');
+    let message = 'Request failed';
+
+    if (typeof data.detail === 'string') {
+      message = data.detail;
+    } else if (Array.isArray(data.detail)) {
+      message = data.detail
+        .map((item) => {
+          if (typeof item === 'string') {
+            return item;
+          }
+
+          if (item?.msg) {
+            return item.msg;
+          }
+
+          return JSON.stringify(item);
+        })
+        .join('; ');
+    } else if (
+      data.detail &&
+      typeof data.detail === 'object'
+    ) {
+      message =
+        data.detail.message ||
+        data.detail.error ||
+        data.detail.msg ||
+        JSON.stringify(data.detail);
+    } else if (data.message) {
+      message = data.message;
+    }
+
+    throw new Error(message);
   }
 
   return data;
@@ -61,6 +92,16 @@ function esc(value) {
       '"': '&quot;'
     }[character])
   );
+}
+
+/*
+  Creates a safe phone value for tel: links.
+  Keeps numbers and the leading + sign.
+*/
+function phoneForLink(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/[^\d+]/g, '');
 }
 
 function formatDate(value) {
@@ -141,11 +182,14 @@ function updateUserDisplay() {
   }
 
   if (state.user.role === 'owner') {
-    roleElement.textContent = 'Property Owner / Manager';
+    roleElement.textContent =
+      'Property Owner / Manager';
   } else if (state.user.role === 'admin') {
-    roleElement.textContent = 'Administrator';
+    roleElement.textContent =
+      'Administrator';
   } else {
-    roleElement.textContent = 'Customer';
+    roleElement.textContent =
+      'Customer';
   }
 }
 
@@ -154,12 +198,32 @@ function updateUserDisplay() {
 ========================= */
 
 function showApp() {
-  $('#loginView').classList.add('hidden');
-  $('#app').classList.remove('hidden');
+  const loginView = $('#loginView');
+  const app = $('#app');
+
+  if (loginView) {
+    loginView.classList.add('hidden');
+  }
+
+  if (app) {
+    app.classList.remove('hidden');
+  }
 
   load().catch((error) => {
     console.error(error);
-    alert(error.message);
+
+    if (error.message) {
+      alert(error.message);
+    }
+
+    if (
+      error.message?.toLowerCase().includes('401') ||
+      error.message?.toLowerCase().includes('unauthorized')
+    ) {
+      localStorage.removeItem('asaba_token');
+      state.token = null;
+      location.reload();
+    }
   });
 }
 
@@ -167,130 +231,240 @@ function showApp() {
    LOGIN
 ========================= */
 
-$('#loginForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
+function setupLoginForm() {
+  const loginForm = $('#loginForm');
 
-  $('#loginError').textContent = '';
-
-  try {
-    const result = await api('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: $('#email').value.trim(),
-        password: $('#password').value
-      })
-    });
-
-    state.token = result.access_token;
-
-    localStorage.setItem(
-      'asaba_token',
-      state.token
-    );
-
-    showApp();
-  } catch (error) {
-    $('#loginError').textContent = error.message;
+  if (!loginForm) {
+    return;
   }
-});
+
+  loginForm.addEventListener(
+    'submit',
+    async (event) => {
+      event.preventDefault();
+
+      const loginError = $('#loginError');
+
+      if (loginError) {
+        loginError.textContent = '';
+      }
+
+      try {
+        const result = await api('/auth/login', {
+          method: 'POST',
+
+          body: JSON.stringify({
+            email: $('#email').value.trim(),
+            password: $('#password').value
+          })
+        });
+
+        state.token = result.access_token;
+
+        localStorage.setItem(
+          'asaba_token',
+          state.token
+        );
+
+        showApp();
+
+      } catch (error) {
+        if (loginError) {
+          loginError.textContent =
+            error.message;
+        }
+      }
+    }
+  );
+}
 
 /* =========================
    SHOW REGISTER
 ========================= */
 
-$('#showRegister').addEventListener('click', () => {
-  $('#signInPanel').classList.add('hidden');
-  $('#registerPanel').classList.remove('hidden');
+function setupAuthSwitching() {
+  const showRegister = $('#showRegister');
+  const showLogin = $('#showLogin');
 
-  $('#loginError').textContent = '';
-});
+  if (showRegister) {
+    showRegister.addEventListener(
+      'click',
+      () => {
+        $('#signInPanel')
+          ?.classList
+          .add('hidden');
 
-/* =========================
-   SHOW LOGIN
-========================= */
+        $('#registerPanel')
+          ?.classList
+          .remove('hidden');
 
-$('#showLogin').addEventListener('click', () => {
-  $('#registerPanel').classList.add('hidden');
-  $('#signInPanel').classList.remove('hidden');
+        const loginError = $('#loginError');
 
-  $('#registerError').textContent = '';
-});
+        if (loginError) {
+          loginError.textContent = '';
+        }
+      }
+    );
+  }
+
+  if (showLogin) {
+    showLogin.addEventListener(
+      'click',
+      () => {
+        $('#registerPanel')
+          ?.classList
+          .add('hidden');
+
+        $('#signInPanel')
+          ?.classList
+          .remove('hidden');
+
+        const registerError =
+          $('#registerError');
+
+        if (registerError) {
+          registerError.textContent = '';
+        }
+      }
+    );
+  }
+}
 
 /* =========================
    REGISTER
 ========================= */
 
-$('#registerForm').addEventListener('submit', async (event) => {
-  event.preventDefault();
+function setupRegisterForm() {
+  const registerForm =
+    $('#registerForm');
 
-  $('#registerError').textContent = '';
-
-  const email = $('#registerEmail').value.trim();
-  const password = $('#registerPassword').value;
-  const confirmPassword =
-    $('#registerConfirmPassword').value;
-  const role = $('#registerRole').value;
-
-  if (!email) {
-    $('#registerError').textContent =
-      'Please enter your email address.';
+  if (!registerForm) {
     return;
   }
 
-  if (password.length < 8) {
-    $('#registerError').textContent =
-      'Password must be at least 8 characters.';
-    return;
-  }
+  registerForm.addEventListener(
+    'submit',
+    async (event) => {
+      event.preventDefault();
 
-  if (password !== confirmPassword) {
-    $('#registerError').textContent =
-      'Passwords do not match.';
-    return;
-  }
+      const registerError =
+        $('#registerError');
 
-  if (!role) {
-    $('#registerError').textContent =
-      'Please select an account type.';
-    return;
-  }
+      if (registerError) {
+        registerError.textContent = '';
+      }
 
-  try {
-    const result = await api('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        email,
-        password,
-        confirm_password: confirmPassword,
-        role
-      })
-    });
+      const email =
+        $('#registerEmail')
+          .value
+          .trim();
 
-    state.token = result.access_token;
+      const password =
+        $('#registerPassword')
+          .value;
 
-    localStorage.setItem(
-      'asaba_token',
-      state.token
-    );
+      const confirmPassword =
+        $('#registerConfirmPassword')
+          .value;
 
-    showApp();
-  } catch (error) {
-    $('#registerError').textContent = error.message;
-  }
-});
+      const role =
+        $('#registerRole')
+          .value;
+
+      if (!email) {
+        if (registerError) {
+          registerError.textContent =
+            'Please enter your email address.';
+        }
+
+        return;
+      }
+
+      if (password.length < 8) {
+        if (registerError) {
+          registerError.textContent =
+            'Password must be at least 8 characters.';
+        }
+
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        if (registerError) {
+          registerError.textContent =
+            'Passwords do not match.';
+        }
+
+        return;
+      }
+
+      if (!role) {
+        if (registerError) {
+          registerError.textContent =
+            'Please select an account type.';
+        }
+
+        return;
+      }
+
+      try {
+        const result = await api(
+          '/auth/register',
+          {
+            method: 'POST',
+
+            body: JSON.stringify({
+              email,
+              password,
+              confirm_password:
+                confirmPassword,
+              role
+            })
+          }
+        );
+
+        state.token =
+          result.access_token;
+
+        localStorage.setItem(
+          'asaba_token',
+          state.token
+        );
+
+        showApp();
+
+      } catch (error) {
+        if (registerError) {
+          registerError.textContent =
+            error.message;
+        }
+      }
+    }
+  );
+}
 
 /* =========================
    LOGOUT
 ========================= */
 
-$('#logout').onclick = () => {
-  localStorage.removeItem('asaba_token');
+function setupLogout() {
+  const logout = $('#logout');
 
-  state.token = null;
-  state.user = null;
+  if (!logout) {
+    return;
+  }
 
-  location.reload();
-};
+  logout.onclick = () => {
+    localStorage.removeItem(
+      'asaba_token'
+    );
+
+    state.token = null;
+    state.user = null;
+
+    location.reload();
+  };
+}
 
 /* =========================
    ROLE-BASED NAVIGATION
@@ -298,30 +472,13 @@ $('#logout').onclick = () => {
 
 function setupRoleNavigation() {
   const navigationButtons =
-    document.querySelectorAll('.nav[data-view]');
+    document.querySelectorAll(
+      '.nav[data-view]'
+    );
 
   navigationButtons.forEach((button) => {
-    const view = button.dataset.view;
-
-    /*
-      Customer:
-      dashboard
-      calendar
-      bookings
-      properties
-
-      Owner:
-      dashboard
-      calendar
-      bookings
-      properties
-
-      Admin:
-      dashboard
-      calendar
-      bookings
-      properties
-    */
+    const view =
+      button.dataset.view;
 
     button.style.display = 'flex';
 
@@ -330,11 +487,13 @@ function setupRoleNavigation() {
       state.user.role === 'customer'
     ) {
       if (view === 'properties') {
-        button.textContent = 'Browse Properties';
+        button.textContent =
+          'Browse Properties';
       }
 
       if (view === 'bookings') {
-        button.textContent = 'My Bookings';
+        button.textContent =
+          'My Bookings';
       }
     }
 
@@ -343,11 +502,13 @@ function setupRoleNavigation() {
       state.user.role === 'owner'
     ) {
       if (view === 'properties') {
-        button.textContent = 'My Properties';
+        button.textContent =
+          'My Properties';
       }
 
       if (view === 'bookings') {
-        button.textContent = 'Bookings';
+        button.textContent =
+          'Bookings';
       }
     }
 
@@ -356,11 +517,13 @@ function setupRoleNavigation() {
       state.user.role === 'admin'
     ) {
       if (view === 'properties') {
-        button.textContent = 'Properties';
+        button.textContent =
+          'Properties';
       }
 
       if (view === 'bookings') {
-        button.textContent = 'All Bookings';
+        button.textContent =
+          'All Bookings';
       }
     }
 
@@ -368,7 +531,9 @@ function setupRoleNavigation() {
       state.view = view;
 
       document
-        .querySelectorAll('.nav[data-view]')
+        .querySelectorAll(
+          '.nav[data-view]'
+        )
         .forEach((item) => {
           item.classList.toggle(
             'active',
@@ -385,22 +550,57 @@ function setupRoleNavigation() {
    NEW BOOKING BUTTON
 ========================= */
 
-$('#newBooking').onclick = () => {
-  openModal();
-};
+function setupNewBookingButton() {
+  const newBooking =
+    $('#newBooking');
+
+  if (!newBooking) {
+    return;
+  }
+
+  /*
+    Only customers should create bookings
+    through the customer-facing booking flow.
+  */
+  if (
+    state.user &&
+    state.user.role !== 'customer'
+  ) {
+    newBooking.style.display = 'none';
+    return;
+  }
+
+  newBooking.onclick = () => {
+    openModal();
+  };
+}
 
 /* =========================
    MAIN RENDER
 ========================= */
 
 function render() {
+  const pageTitle =
+    $('#pageTitle');
+
+  const content =
+    $('#content');
+
+  if (!content) {
+    return;
+  }
+
   const titles = {
     dashboard: 'Overview',
-    calendar: 'Booking Calendar',
+
+    calendar:
+      'Booking Calendar',
+
     bookings:
       state.user?.role === 'customer'
         ? 'My Bookings'
         : 'Bookings',
+
     properties:
       state.user?.role === 'owner'
         ? 'My Properties'
@@ -409,24 +609,33 @@ function render() {
           : 'Properties'
   };
 
-  $('#pageTitle').textContent =
-    titles[state.view] || 'Overview';
+  if (pageTitle) {
+    pageTitle.textContent =
+      titles[state.view] ||
+      'Overview';
+  }
 
-  const content = $('#content');
-
-  if (state.view === 'dashboard') {
+  if (
+    state.view === 'dashboard'
+  ) {
     dashboard(content);
   }
 
-  if (state.view === 'bookings') {
+  if (
+    state.view === 'bookings'
+  ) {
     bookings(content);
   }
 
-  if (state.view === 'calendar') {
+  if (
+    state.view === 'calendar'
+  ) {
     calendar(content);
   }
 
-  if (state.view === 'properties') {
+  if (
+    state.view === 'properties'
+  ) {
     properties(content);
   }
 }
@@ -436,26 +645,35 @@ function render() {
 ========================= */
 
 function dashboard(content) {
-  const role = state.user?.role;
+  const role =
+    state.user?.role;
 
   const activeBookings =
     state.bookings.filter(
       (booking) =>
-        booking.status === 'confirmed' ||
-        booking.status === 'pending'
+        booking.status ===
+          'confirmed' ||
+        booking.status ===
+          'pending'
     );
 
   const totalRevenue =
     activeBookings.reduce(
       (sum, booking) =>
-        sum + Number(booking.total_amount || 0),
+        sum +
+        Number(
+          booking.total_amount || 0
+        ),
       0
     );
 
   const totalDeposits =
     activeBookings.reduce(
       (sum, booking) =>
-        sum + Number(booking.deposit_amount || 0),
+        sum +
+        Number(
+          booking.deposit_amount || 0
+        ),
       0
     );
 
@@ -482,23 +700,32 @@ function dashboard(content) {
 
       <div class="stat-card">
         <span>Properties</span>
-        <strong>${state.properties.length}</strong>
+        <strong>
+          ${state.properties.length}
+        </strong>
       </div>
 
       <div class="stat-card">
         <span>Active bookings</span>
-        <strong>${activeBookings.length}</strong>
+        <strong>
+          ${activeBookings.length}
+        </strong>
       </div>
 
       <div class="stat-card">
         <span>Revenue</span>
-        <strong>${money(totalRevenue)}</strong>
+        <strong>
+          ${money(totalRevenue)}
+        </strong>
       </div>
 
       <div class="stat-card">
         <span>Outstanding</span>
         <strong>
-          ${money(totalRevenue - totalDeposits)}
+          ${money(
+            totalRevenue -
+            totalDeposits
+          )}
         </strong>
       </div>
 
@@ -509,6 +736,7 @@ function dashboard(content) {
       <div class="panel-head">
 
         <div>
+
           <h2>
             ${
               role === 'customer'
@@ -522,6 +750,7 @@ function dashboard(content) {
           <p class="muted">
             ${welcomeText}
           </p>
+
         </div>
 
       </div>
@@ -531,7 +760,9 @@ function dashboard(content) {
           ? `
             <div class="panel">
 
-              <h3>Property Owner / Manager</h3>
+              <h3>
+                Property Owner / Manager
+              </h3>
 
               <p class="muted">
                 Your properties will appear under
@@ -557,7 +788,9 @@ function dashboard(content) {
           ? `
             <div class="panel">
 
-              <h3>Find a place in Asaba</h3>
+              <h3>
+                Find a place in Asaba
+              </h3>
 
               <p class="muted">
                 Browse hotels, shortlets and event
@@ -579,14 +812,20 @@ function dashboard(content) {
       ${
         state.bookings.length
           ? `
-            <h3>Recent bookings</h3>
+            <h3>
+              Recent bookings
+            </h3>
 
             ${state.bookings
               .slice()
               .sort(
                 (a, b) =>
-                  new Date(b.start_at) -
-                  new Date(a.start_at)
+                  new Date(
+                    b.start_at
+                  ) -
+                  new Date(
+                    a.start_at
+                  )
               )
               .slice(0, 5)
               .map(
@@ -594,6 +833,7 @@ function dashboard(content) {
                   <div class="booking-row">
 
                     <div>
+
                       <strong>
                         ${esc(
                           booking.customer_name
@@ -605,6 +845,7 @@ function dashboard(content) {
                           booking.start_at
                         )}
                       </div>
+
                     </div>
 
                     <div>
@@ -623,6 +864,7 @@ function dashboard(content) {
                 `
               )
               .join('')}
+
           `
           : `
             ${
@@ -649,7 +891,9 @@ function goToView(view) {
   state.view = view;
 
   document
-    .querySelectorAll('.nav[data-view]')
+    .querySelectorAll(
+      '.nav[data-view]'
+    )
     .forEach((button) => {
       button.classList.toggle(
         'active',
@@ -665,7 +909,8 @@ function goToView(view) {
 ========================= */
 
 function bookings(content) {
-  const role = state.user?.role;
+  const role =
+    state.user?.role;
 
   content.innerHTML = `
     <div class="panel">
@@ -673,6 +918,7 @@ function bookings(content) {
       <div class="panel-head">
 
         <div>
+
           <h2>
             ${
               role === 'customer'
@@ -688,12 +934,12 @@ function bookings(content) {
                 : 'Manage booking records and deposits.'
             }
           </p>
+
         </div>
 
         ${
           role === 'customer'
-            ? ''
-            : `
+            ? `
               <button
                 class="btn primary"
                 onclick="openModal()"
@@ -701,6 +947,7 @@ function bookings(content) {
                 + New Booking
               </button>
             `
+            : ''
         }
 
       </div>
@@ -713,6 +960,7 @@ function bookings(content) {
               <table>
 
                 <thead>
+
                   <tr>
                     <th>Customer</th>
                     <th>Property</th>
@@ -720,7 +968,15 @@ function bookings(content) {
                     <th>Total</th>
                     <th>Deposit</th>
                     <th>Status</th>
+
+                    ${
+                      role === 'customer'
+                        ? '<th>Contact / Action</th>'
+                        : ''
+                    }
+
                   </tr>
+
                 </thead>
 
                 <tbody>
@@ -733,6 +989,14 @@ function bookings(content) {
                           (property) =>
                             property.id ===
                             booking.property_id
+                        );
+
+                      const contactPhone =
+                        property?.contact_phone || '';
+
+                      const safePhone =
+                        phoneForLink(
+                          contactPhone
                         );
 
                       return `
@@ -777,6 +1041,93 @@ function bookings(content) {
                               booking.status
                             )}
                           </td>
+
+                          ${
+                            role === 'customer'
+                              ? `
+                                <td>
+
+                                  ${
+                                    contactPhone
+                                      ? `
+                                        <div
+                                          style="
+                                            display:flex;
+                                            flex-direction:column;
+                                            gap:6px;
+                                          "
+                                        >
+
+                                          <small class="muted">
+                                            Payment / Contact
+                                          </small>
+
+                                          <a
+                                            href="tel:${esc(
+                                              safePhone
+                                            )}"
+                                          >
+                                            ${esc(
+                                              contactPhone
+                                            )}
+                                          </a>
+
+                                          <a
+                                            class="btn primary"
+                                            href="tel:${esc(
+                                              safePhone
+                                            )}"
+                                          >
+                                            Contact Owner
+                                          </a>
+
+                                          ${
+                                            booking.status !== 'cancelled' &&
+                                            booking.status !== 'expired'
+                                              ? `
+                                                <button
+                                                  class="btn danger"
+                                                  onclick="cancelBooking(${booking.id})"
+                                                >
+                                                  Cancel Booking
+                                                </button>
+                                              `
+                                              : ''
+                                          }
+
+                                        </div>
+                                      `
+                                      : `
+                                        <div>
+
+                                          <span class="muted">
+                                            Contact information not provided yet.
+                                          </span>
+
+                                          ${
+                                            booking.status !== 'cancelled' &&
+                                            booking.status !== 'expired'
+                                              ? `
+                                                <br><br>
+
+                                                <button
+                                                  class="btn danger"
+                                                  onclick="cancelBooking(${booking.id})"
+                                                >
+                                                  Cancel Booking
+                                                </button>
+                                              `
+                                              : ''
+                                          }
+
+                                        </div>
+                                      `
+                                  }
+
+                                </td>
+                              `
+                              : ''
+                          }
 
                         </tr>
                       `;
@@ -824,12 +1175,16 @@ function calendar(content) {
       <div class="panel-head">
 
         <div>
-          <h2>Booking Calendar</h2>
+
+          <h2>
+            Booking Calendar
+          </h2>
 
           <p class="muted">
             View scheduled bookings and prevent
             overlapping reservations.
           </p>
+
         </div>
 
       </div>
@@ -929,7 +1284,8 @@ function calendar(content) {
 ========================= */
 
 function properties(content) {
-  const role = state.user?.role;
+  const role =
+    state.user?.role;
 
   content.innerHTML = `
     <div class="panel">
@@ -937,6 +1293,7 @@ function properties(content) {
       <div class="panel-head">
 
         <div>
+
           <h2>
             ${
               role === 'owner'
@@ -951,10 +1308,12 @@ function properties(content) {
             Hotels, shortlets and event centres
             connected to AsabaStayBook.
           </p>
+
         </div>
 
         ${
-          role === 'owner' || role === 'admin'
+          role === 'owner' ||
+          role === 'admin'
             ? `
               <button
                 class="btn primary"
@@ -975,73 +1334,204 @@ function properties(content) {
 
               ${state.properties
                 .map(
-                  (property) => `
-                    <article class="property-card">
+                  (property) => {
 
-                      ${
-                        property.image
-                          ? `
-                            <img
-                              src="${esc(
-                                property.image
-                              )}"
-                              alt="${esc(
-                                property.name
-                              )}"
-                            >
-                          `
-                          : ''
-                      }
+                    const contactPhone =
+                      property.contact_phone ||
+                      '';
 
-                      <div class="property-body">
+                    const safePhone =
+                      phoneForLink(
+                        contactPhone
+                      );
 
-                        <h3>
-                          ${esc(
-                            property.name
-                          )}
-                        </h3>
-
-                        <p class="muted">
-                          ${esc(
-                            property.kind
-                          )}
-                          ·
-                          ${esc(
-                            property.location
-                          )}
-                        </p>
-
-                        <p>
-                          Capacity:
-                          ${property.capacity}
-                        </p>
-
-                        <strong>
-                          ${money(
-                            property.price_per_day
-                          )}
-                          / day
-                        </strong>
+                    return `
+                      <article class="property-card">
 
                         ${
-                          role === 'customer'
+                          property.image
                             ? `
-                              <br><br>
-
-                              <button
-                                class="btn primary"
-                                onclick="openModalForProperty(${property.id})"
+                              <img
+                                src="${esc(
+                                  property.image
+                                )}"
+                                alt="${esc(
+                                  property.name
+                                )}"
                               >
-                                Book this property
-                              </button>
                             `
                             : ''
                         }
 
-                      </div>
+                        <div class="property-body">
 
-                    </article>
-                  `
+                          <h3>
+                            ${esc(
+                              property.name
+                            )}
+                          </h3>
+
+                          <p class="muted">
+
+                            ${esc(
+                              property.kind
+                            )}
+
+                            ·
+
+                            ${esc(
+                              property.location
+                            )}
+
+                          </p>
+
+                          <p>
+                            Capacity:
+                            ${property.capacity}
+                          </p>
+
+                          <strong>
+                            ${money(
+                              property.price_per_day
+                            )}
+                            / day
+                          </strong>
+
+                          ${
+                            role === 'customer'
+                              ? `
+                                <div
+                                  class="payment-contact"
+                                  style="
+                                    margin-top:16px;
+                                    padding:14px;
+                                    border-radius:12px;
+                                    background:#f3e8ff;
+                                  "
+                                >
+
+                                  <strong>
+                                    Payment & Contact
+                                  </strong>
+
+                                  <p
+                                    class="muted"
+                                    style="margin:6px 0;"
+                                  >
+                                    Contact this number for
+                                    payment instructions or
+                                    more information.
+                                  </p>
+
+                                  ${
+                                    contactPhone
+                                      ? `
+                                        <a
+                                          href="tel:${esc(
+                                            safePhone
+                                          )}"
+                                          style="
+                                            font-weight:700;
+                                            display:block;
+                                            margin-bottom:10px;
+                                          "
+                                        >
+                                          ${esc(
+                                            contactPhone
+                                          )}
+                                        </a>
+
+                                        <a
+                                          class="btn primary"
+                                          href="tel:${esc(
+                                            safePhone
+                                          )}"
+                                        >
+                                          Contact Owner
+                                        </a>
+                                      `
+                                      : `
+                                        <p class="muted">
+                                          Contact information
+                                          not provided yet.
+                                        </p>
+                                      `
+                                  }
+
+                                </div>
+
+                                <br>
+
+                                <button
+                                  class="btn primary"
+                                  onclick="openModalForProperty(${property.id})"
+                                >
+                                  Book this property
+                                </button>
+                              `
+                              : ''
+                          }
+
+                          ${
+                            role === 'owner' ||
+                            role === 'admin'
+                              ? `
+                                <div
+                                  style="
+                                    margin-top:14px;
+                                    display:flex;
+                                    gap:8px;
+                                    flex-wrap:wrap;
+                                  "
+                                >
+
+                                  ${
+                                    contactPhone
+                                      ? `
+                                        <div
+                                          class="muted"
+                                          style="
+                                            width:100%;
+                                          "
+                                        >
+                                          Payment / Contact:
+                                          <strong>
+                                            ${esc(
+                                              contactPhone
+                                            )}
+                                          </strong>
+                                        </div>
+                                      `
+                                      : `
+                                        <div
+                                          class="muted"
+                                          style="
+                                            width:100%;
+                                          "
+                                        >
+                                          No contact phone
+                                          added yet.
+                                        </div>
+                                      `
+                                  }
+
+                                  <button
+                                    class="btn danger"
+                                    onclick="deleteProperty(${property.id})"
+                                  >
+                                    Delete
+                                  </button>
+
+                                </div>
+                              `
+                              : ''
+                          }
+
+                        </div>
+
+                      </article>
+                    `;
+                  }
                 )
                 .join('')}
 
@@ -1051,11 +1541,13 @@ function properties(content) {
             <div>
 
               <p class="muted">
+
                 ${
                   role === 'owner'
                     ? 'You have not added any properties yet.'
                     : 'No properties have been added yet.'
                 }
+
               </p>
 
               ${
@@ -1080,13 +1572,127 @@ function properties(content) {
 }
 
 /* =========================
+   DELETE PROPERTY
+========================= */
+
+async function deleteProperty(propertyId) {
+  const property =
+    state.properties.find(
+      (item) =>
+        item.id === propertyId
+    );
+
+  const propertyName =
+    property?.name ||
+    'this property';
+
+  const confirmed =
+    confirm(
+      `Are you sure you want to delete "${propertyName}"?\n\nThis action cannot be undone.`
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await api(
+      `/properties/${propertyId}`,
+      {
+        method: 'DELETE'
+      }
+    );
+
+    alert(
+      'Property deleted successfully.'
+    );
+
+    await load();
+
+    state.view =
+      'properties';
+
+    render();
+
+  } catch (error) {
+    alert(
+      `Could not delete property: ${error.message}`
+    );
+  }
+}
+
+/* =========================
+   CANCEL BOOKING
+========================= */
+
+async function cancelBooking(bookingId) {
+  const confirmed =
+    confirm(
+      'Are you sure you want to cancel this booking?'
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    /*
+      IMPORTANT:
+      The FastAPI backend expects the status
+      as a query parameter.
+
+      Correct:
+      PATCH /api/bookings/{booking_id}/status?status=cancelled
+
+      Do NOT send status in a JSON body.
+    */
+
+    await api(
+      `/bookings/${bookingId}/status?status=cancelled`,
+      {
+        method: 'PATCH'
+      }
+    );
+
+    alert(
+      'Booking cancelled successfully.'
+    );
+
+    await load();
+
+    state.view =
+      'bookings';
+
+    render();
+
+  } catch (error) {
+    console.error(
+      'Cancel booking error:',
+      error
+    );
+
+    alert(
+      `Could not cancel booking: ${error.message}`
+    );
+  }
+}
+
+/* =========================
    PROPERTY MODAL
 ========================= */
 
 function openPropertyModal() {
-  $('#modal').classList.remove('hidden');
+  const modal = $('#modal');
 
-  $('#modal').innerHTML = `
+  if (!modal) {
+    return;
+  }
+
+  modal
+    .classList
+    .remove('hidden');
+
+  modal.innerHTML = `
     <div class="modal-card">
 
       <button
@@ -1097,7 +1703,9 @@ function openPropertyModal() {
         ×
       </button>
 
-      <h2>Add Property</h2>
+      <h2>
+        Add Property
+      </h2>
 
       <p class="muted">
         Add a hotel, shortlet or event centre.
@@ -1119,7 +1727,10 @@ function openPropertyModal() {
         <label>
           Property type
 
-          <select id="propertyKind" required>
+          <select
+            id="propertyKind"
+            required
+          >
 
             <option value="">
               Select property type
@@ -1176,15 +1787,43 @@ function openPropertyModal() {
           >
         </label>
 
+        <!-- NEW CONTACT PHONE FIELD -->
+
         <label>
-          Image URL
+          Contact / Payment Phone Number
+
+          <input
+            id="propertyContactPhone"
+            type="tel"
+            placeholder="08012345678"
+            required
+          >
+        </label>
+
+        <small class="muted">
+          Customers should contact this number
+          for payment instructions or more information.
+        </small>
+
+        <label>
+          Property Image
 
           <input
             id="propertyImage"
-            type="url"
-            placeholder="https://..."
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
           >
         </label>
+
+        <div
+          id="propertyImagePreview"
+          class="property-image-preview"
+        ></div>
+
+        <p class="muted">
+          Choose a JPG, PNG or WebP image.
+          Maximum size: 2 MB.
+        </p>
 
         <p
           id="propertyError"
@@ -1221,10 +1860,92 @@ function openPropertyModal() {
   $('#cancelProperty').onclick =
     closeModal;
 
+  $('#propertyImage').addEventListener(
+    'change',
+    previewPropertyImage
+  );
+
   $('#propertyForm').addEventListener(
     'submit',
     createProperty
   );
+}
+
+/* =========================
+   PROPERTY IMAGE PREVIEW
+========================= */
+
+function previewPropertyImage(event) {
+  const file =
+    event.target.files[0];
+
+  const preview =
+    $('#propertyImagePreview');
+
+  const error =
+    $('#propertyError');
+
+  if (!preview || !error) {
+    return;
+  }
+
+  preview.innerHTML = '';
+
+  error.textContent = '';
+
+  if (!file) {
+    return;
+  }
+
+  if (
+    file.size >
+    2 * 1024 * 1024
+  ) {
+    error.textContent =
+      'Image is too large. Please choose an image smaller than 2 MB.';
+
+    event.target.value = '';
+
+    return;
+  }
+
+  if (
+    !file.type.startsWith(
+      'image/'
+    )
+  ) {
+    error.textContent =
+      'Please choose a valid image file.';
+
+    event.target.value = '';
+
+    return;
+  }
+
+  const reader =
+    new FileReader();
+
+  reader.onload = () => {
+
+    preview.innerHTML = `
+      <img
+        src="${reader.result}"
+        alt="Property image preview"
+        style="
+          width:100%;
+          max-width:320px;
+          height:200px;
+          object-fit:cover;
+          border-radius:12px;
+          display:block;
+          margin-top:8px;
+        "
+      >
+    `;
+
+  };
+
+  reader.readAsDataURL(file);
 }
 
 /* =========================
@@ -1234,63 +1955,207 @@ function openPropertyModal() {
 async function createProperty(event) {
   event.preventDefault();
 
-  $('#propertyError').textContent = '';
+  const propertyError =
+    $('#propertyError');
+
+  if (propertyError) {
+    propertyError.textContent = '';
+  }
 
   const name =
-    $('#propertyName').value.trim();
+    $('#propertyName')
+      .value
+      .trim();
 
   const kind =
-    $('#propertyKind').value;
+    $('#propertyKind')
+      .value;
 
   const location =
-    $('#propertyLocation').value.trim();
+    $('#propertyLocation')
+      .value
+      .trim();
 
   const capacity =
     Number(
-      $('#propertyCapacity').value
+      $('#propertyCapacity')
+        .value
     );
 
   const pricePerDay =
     Number(
-      $('#propertyPrice').value
+      $('#propertyPrice')
+        .value
     );
 
-  const image =
-    $('#propertyImage').value.trim();
+  /*
+    NEW:
+    Owner's customer-facing contact/payment number.
+  */
+  const contactPhone =
+    $('#propertyContactPhone')
+      .value
+      .trim();
 
-  if (!name || !kind || !location) {
-    $('#propertyError').textContent =
-      'Please complete all required fields.';
+  const imageFile =
+    $('#propertyImage')
+      .files[0];
+
+  if (
+    !name ||
+    !kind ||
+    !location
+  ) {
+    if (propertyError) {
+      propertyError.textContent =
+        'Please complete all required fields.';
+    }
+
+    return;
+  }
+
+  if (!contactPhone) {
+    if (propertyError) {
+      propertyError.textContent =
+        'Please enter the contact / payment phone number.';
+    }
+
+    return;
+  }
+
+  if (
+    contactPhone.replace(
+      /[^\d]/g,
+      ''
+    ).length < 7
+  ) {
+    if (propertyError) {
+      propertyError.textContent =
+        'Please enter a valid contact phone number.';
+    }
+
+    return;
+  }
+
+  if (
+    !Number.isFinite(capacity) ||
+    capacity < 1
+  ) {
+    if (propertyError) {
+      propertyError.textContent =
+        'Capacity must be at least 1.';
+    }
+
+    return;
+  }
+
+  if (
+    !Number.isFinite(pricePerDay) ||
+    pricePerDay < 0
+  ) {
+    if (propertyError) {
+      propertyError.textContent =
+        'Please enter a valid price.';
+    }
+
+    return;
+  }
+
+  if (
+    imageFile &&
+    imageFile.size >
+      2 * 1024 * 1024
+  ) {
+    if (propertyError) {
+      propertyError.textContent =
+        'Image is too large. Please choose an image smaller than 2 MB.';
+    }
+
     return;
   }
 
   try {
-    await api('/properties', {
-      method: 'POST',
 
-      body: JSON.stringify({
-        name,
-        kind,
-        location,
-        capacity,
-        price_per_day: pricePerDay,
-        image:
-          image ||
-          'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1400&q=82'
-      })
-    });
+    let image = null;
+
+    if (imageFile) {
+
+      image =
+        await new Promise(
+          (resolve, reject) => {
+
+            const reader =
+              new FileReader();
+
+            reader.onload = () => {
+              resolve(
+                reader.result
+              );
+            };
+
+            reader.onerror = () => {
+              reject(
+                new Error(
+                  'Could not read the selected image.'
+                )
+              );
+            };
+
+            reader.readAsDataURL(
+              imageFile
+            );
+
+          }
+        );
+
+    }
+
+    await api(
+      '/properties',
+      {
+        method: 'POST',
+
+        body: JSON.stringify({
+          name,
+          kind,
+          location,
+          capacity,
+          price_per_day:
+            pricePerDay,
+
+          /*
+            NEW:
+            Send the contact phone
+            to the FastAPI backend.
+          */
+          contact_phone:
+            contactPhone,
+
+          image
+        })
+      }
+    );
 
     closeModal();
 
     await load();
 
-    state.view = 'properties';
+    state.view =
+      'properties';
 
     render();
 
+    alert(
+      'Property added successfully.'
+    );
+
   } catch (error) {
-    $('#propertyError').textContent =
-      error.message;
+
+    if (propertyError) {
+      propertyError.textContent =
+        error.message;
+    }
+
   }
 }
 
@@ -1298,11 +2163,21 @@ async function createProperty(event) {
    NEW BOOKING MODAL
 ========================= */
 
-function openModalForProperty(propertyId) {
+function openModalForProperty(
+  propertyId
+) {
   openModal(propertyId);
 }
 
-function openModal(selectedPropertyId = null) {
+function openModal(
+  selectedPropertyId = null
+) {
+  const modal = $('#modal');
+
+  if (!modal) {
+    return;
+  }
+
   const propertyOptions =
     state.properties.length
       ? state.properties
@@ -1311,13 +2186,19 @@ function openModal(selectedPropertyId = null) {
               <option
                 value="${property.id}"
                 ${
-                  Number(property.id) ===
-                  Number(selectedPropertyId)
+                  Number(
+                    property.id
+                  ) ===
+                  Number(
+                    selectedPropertyId
+                  )
                     ? 'selected'
                     : ''
                 }
               >
-                ${esc(property.name)}
+                ${esc(
+                  property.name
+                )}
               </option>
             `
           )
@@ -1328,9 +2209,11 @@ function openModal(selectedPropertyId = null) {
           </option>
         `;
 
-  $('#modal').classList.remove('hidden');
+  modal
+    .classList
+    .remove('hidden');
 
-  $('#modal').innerHTML = `
+  modal.innerHTML = `
     <div class="modal-card">
 
       <button
@@ -1341,7 +2224,9 @@ function openModal(selectedPropertyId = null) {
         ×
       </button>
 
-      <h2>New Booking</h2>
+      <h2>
+        New Booking
+      </h2>
 
       <p class="muted">
         Record a hotel, shortlet or event-centre booking.
@@ -1364,8 +2249,18 @@ function openModal(selectedPropertyId = null) {
             ${propertyOptions}
 
           </select>
-
         </label>
+
+        <div
+          id="bookingPropertyContact"
+          style="
+            display:none;
+            margin-bottom:14px;
+            padding:12px;
+            border-radius:10px;
+            background:#f3e8ff;
+          "
+        ></div>
 
         <label>
           Customer name
@@ -1480,10 +2375,103 @@ function openModal(selectedPropertyId = null) {
   $('#cancelBooking').onclick =
     closeModal;
 
+  $('#bookingProperty').addEventListener(
+    'change',
+    updateBookingPropertyContact
+  );
+
   $('#bookingForm').addEventListener(
     'submit',
     createBooking
   );
+
+  updateBookingPropertyContact();
+}
+
+/* =========================
+   BOOKING PROPERTY CONTACT
+========================= */
+
+function updateBookingPropertyContact() {
+  const select =
+    $('#bookingProperty');
+
+  const contactBox =
+    $('#bookingPropertyContact');
+
+  if (!select || !contactBox) {
+    return;
+  }
+
+  const property =
+    state.properties.find(
+      (item) =>
+        Number(item.id) ===
+        Number(select.value)
+    );
+
+  if (!property) {
+    contactBox.style.display =
+      'none';
+
+    contactBox.innerHTML = '';
+
+    return;
+  }
+
+  const contactPhone =
+    property.contact_phone ||
+    '';
+
+  if (!contactPhone) {
+    contactBox.style.display =
+      'block';
+
+    contactBox.innerHTML = `
+      <strong>
+        Payment & Contact
+      </strong>
+
+      <p
+        class="muted"
+        style="margin:6px 0 0;"
+      >
+        Contact information has not
+        been provided yet.
+      </p>
+    `;
+
+    return;
+  }
+
+  const safePhone =
+    phoneForLink(
+      contactPhone
+    );
+
+  contactBox.style.display =
+    'block';
+
+  contactBox.innerHTML = `
+    <strong>
+      Payment & Contact
+    </strong>
+
+    <p
+      class="muted"
+      style="margin:6px 0;"
+    >
+      Contact this number for payment
+      instructions or more information:
+    </p>
+
+    <a
+      href="tel:${esc(safePhone)}"
+      style="font-weight:700;"
+    >
+      ${esc(contactPhone)}
+    </a>
+  `;
 }
 
 /* =========================
@@ -1493,11 +2481,17 @@ function openModal(selectedPropertyId = null) {
 async function createBooking(event) {
   event.preventDefault();
 
-  $('#bookingError').textContent = '';
+  const bookingError =
+    $('#bookingError');
+
+  if (bookingError) {
+    bookingError.textContent = '';
+  }
 
   const propertyId =
     Number(
-      $('#bookingProperty').value
+      $('#bookingProperty')
+        .value
     );
 
   const customerName =
@@ -1532,14 +2526,38 @@ async function createBooking(event) {
       .trim();
 
   if (!propertyId) {
-    $('#bookingError').textContent =
-      'Please select a property.';
+    if (bookingError) {
+      bookingError.textContent =
+        'Please select a property.';
+    }
+
     return;
   }
 
   if (!customerName) {
-    $('#bookingError').textContent =
-      'Please enter the customer name.';
+    if (bookingError) {
+      bookingError.textContent =
+        'Please enter the customer name.';
+    }
+
+    return;
+  }
+
+  if (!customerPhone) {
+    if (bookingError) {
+      bookingError.textContent =
+        'Please enter the customer phone number.';
+    }
+
+    return;
+  }
+
+  if (!startAt || !endAt) {
+    if (bookingError) {
+      bookingError.textContent =
+        'Please select the start and end date/time.';
+    }
+
     return;
   }
 
@@ -1547,47 +2565,142 @@ async function createBooking(event) {
     new Date(endAt) <=
     new Date(startAt)
   ) {
-    $('#bookingError').textContent =
-      'End time must be after start time.';
+    if (bookingError) {
+      bookingError.textContent =
+        'End time must be after start time.';
+    }
+
     return;
   }
 
-  if (depositAmount > totalAmount) {
-    $('#bookingError').textContent =
-      'Deposit cannot exceed the total amount.';
+  if (
+    !Number.isFinite(totalAmount) ||
+    totalAmount < 0
+  ) {
+    if (bookingError) {
+      bookingError.textContent =
+        'Please enter a valid total amount.';
+    }
+
+    return;
+  }
+
+  if (
+    !Number.isFinite(depositAmount) ||
+    depositAmount < 0
+  ) {
+    if (bookingError) {
+      bookingError.textContent =
+        'Please enter a valid deposit amount.';
+    }
+
+    return;
+  }
+
+  if (
+    depositAmount >
+    totalAmount
+  ) {
+    if (bookingError) {
+      bookingError.textContent =
+        'Deposit cannot exceed the total amount.';
+    }
+
     return;
   }
 
   try {
-    await api('/bookings', {
-      method: 'POST',
 
-      body: JSON.stringify({
-        property_id: propertyId,
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        start_at:
-          new Date(startAt).toISOString(),
-        end_at:
-          new Date(endAt).toISOString(),
-        total_amount: totalAmount,
-        deposit_amount: depositAmount,
-        status: 'confirmed',
-        notes: notes || null
-      })
-    });
+    await api(
+      '/bookings',
+      {
+        method: 'POST',
+
+        body: JSON.stringify({
+          property_id:
+            propertyId,
+
+          customer_name:
+            customerName,
+
+          customer_phone:
+            customerPhone,
+
+          start_at:
+            new Date(
+              startAt
+            ).toISOString(),
+
+          end_at:
+            new Date(
+              endAt
+            ).toISOString(),
+
+          total_amount:
+            totalAmount,
+
+          deposit_amount:
+            depositAmount,
+
+          status:
+            'confirmed',
+
+          notes:
+            notes || null
+        })
+      }
+    );
+
+    /*
+      Find the property after successful
+      booking so the customer can immediately
+      see where to contact the owner.
+    */
+    const bookedProperty =
+      state.properties.find(
+        (property) =>
+          Number(property.id) ===
+          Number(propertyId)
+      );
+
+    const contactPhone =
+      bookedProperty?.contact_phone ||
+      '';
+
+    const safePhone =
+      phoneForLink(
+        contactPhone
+      );
 
     closeModal();
 
     await load();
 
-    state.view = 'bookings';
+    state.view =
+      'bookings';
 
     render();
 
+    if (contactPhone) {
+      alert(
+        `Booking created successfully.\n\n` +
+        `For payment instructions or more information, ` +
+        `contact the property owner on ${contactPhone}.`
+      );
+    } else {
+      alert(
+        'Booking created successfully.\n\n' +
+        'The property owner has not provided a contact/payment number yet.'
+      );
+    }
+
   } catch (error) {
-    $('#bookingError').textContent =
-      error.message;
+
+    if (bookingError) {
+      bookingError.textContent =
+        error.message;
+    }
+
   }
 }
 
@@ -1596,13 +2709,70 @@ async function createBooking(event) {
 ========================= */
 
 function closeModal() {
-  $('#modal').classList.add('hidden');
+  const modal =
+    $('#modal');
+
+  if (!modal) {
+    return;
+  }
+
+  modal
+    .classList
+    .add('hidden');
 }
+
+/* =========================
+   MAKE FUNCTIONS AVAILABLE
+   TO INLINE HTML BUTTONS
+========================= */
+
+window.openPropertyModal =
+  openPropertyModal;
+
+window.goToView =
+  goToView;
+
+window.openModal =
+  openModal;
+
+window.openModalForProperty =
+  openModalForProperty;
+
+window.cancelBooking =
+  cancelBooking;
+
+window.deleteProperty =
+  deleteProperty;
+
+window.closeModal =
+  closeModal;
 
 /* =========================
    START APPLICATION
 ========================= */
 
-if (state.token) {
-  showApp();
+function startApplication() {
+  setupLoginForm();
+
+  setupAuthSwitching();
+
+  setupRegisterForm();
+
+  setupLogout();
+
+  if (state.token) {
+    showApp();
+  }
+}
+
+if (
+  document.readyState ===
+  'loading'
+) {
+  document.addEventListener(
+    'DOMContentLoaded',
+    startApplication
+  );
+} else {
+  startApplication();
 }

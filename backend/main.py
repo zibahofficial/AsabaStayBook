@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine, get_db
@@ -24,30 +25,76 @@ from .schemas import (
     PropertyIn,
     PropertyOut,
     BookingIn,
-    BookingOut
+    BookingOut,
 )
 from .auth import (
     verify_password,
     hash_password,
     make_token,
-    current_user
+    current_user,
 )
 
+
+# =========================================================
+# DATABASE
+# =========================================================
 
 Base.metadata.create_all(engine)
 
 
+def ensure_property_contact_phone_column():
+    """
+    Adds the contact_phone column to an existing properties table
+    if the column does not already exist.
+
+    This is needed because SQLAlchemy create_all() does not modify
+    an existing table when a new column is added to the model.
+    """
+
+    inspector = inspect(engine)
+
+    if "properties" not in inspector.get_table_names():
+        return
+
+    columns = inspector.get_columns("properties")
+
+    existing_columns = {
+        column["name"]
+        for column in columns
+    }
+
+    if "contact_phone" not in existing_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE properties "
+                    "ADD COLUMN contact_phone VARCHAR(50)"
+                )
+            )
+
+
+ensure_property_contact_phone_column()
+
+
+# =========================================================
+# APP
+# =========================================================
+
 app = FastAPI(
     title="AsabaStayBook API",
-    version="1.0.0"
+    version="1.0.0",
 )
 
+
+# =========================================================
+# CORS
+# =========================================================
 
 origins = [
     x.strip()
     for x in os.getenv(
         "CORS_ORIGINS",
-        "http://127.0.0.1:5500,http://localhost:5500"
+        "http://127.0.0.1:5500,http://localhost:5500",
     ).split(",")
     if x.strip()
 ]
@@ -58,21 +105,28 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
+
+# =========================================================
+# STATIC FILES
+# =========================================================
 
 app.mount(
     "/assets",
     StaticFiles(
         directory="frontend/assets"
     ),
-    name="assets"
+    name="assets",
 )
 
 
-def expire_pending(db):
+# =========================================================
+# BOOKING EXPIRY
+# =========================================================
 
+def expire_pending(db: Session):
     now = (
         datetime.now(timezone.utc)
         .replace(tzinfo=None)
@@ -83,7 +137,7 @@ def expire_pending(db):
         .filter(
             Booking.status == "pending",
             Booking.expires_at.isnot(None),
-            Booking.expires_at < now
+            Booking.expires_at < now,
         )
         .all()
     )
@@ -95,40 +149,39 @@ def expire_pending(db):
         db.commit()
 
 
+# =========================================================
+# HEALTH
+# =========================================================
+
 @app.get("/api/health")
 def health():
+    return {"status": "ok"}
 
-    return {
-        "status": "ok"
-    }
 
+# =========================================================
+# AUTHENTICATION
+# =========================================================
 
 @app.post(
     "/api/auth/register",
-    response_model=Token
+    response_model=Token,
 )
 def register(
     data: RegisterIn,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-
     email = data.email.lower().strip()
 
     if data.password != data.confirm_password:
-
         raise HTTPException(
             status_code=400,
-            detail="Passwords do not match"
+            detail="Passwords do not match",
         )
 
-    if data.role not in {
-        "customer",
-        "owner"
-    }:
-
+    if data.role not in {"customer", "owner"}:
         raise HTTPException(
             status_code=400,
-            detail="Invalid account type"
+            detail="Invalid account type",
         )
 
     existing = (
@@ -138,18 +191,15 @@ def register(
     )
 
     if existing:
-
         raise HTTPException(
             status_code=409,
-            detail="An account with this email already exists"
+            detail="An account with this email already exists",
         )
 
     user = User(
         email=email,
-        password_hash=hash_password(
-            data.password
-        ),
-        role=data.role
+        password_hash=hash_password(data.password),
+        role=data.role,
     )
 
     db.add(user)
@@ -158,19 +208,18 @@ def register(
 
     return {
         "access_token": make_token(user.id),
-        "token_type": "bearer"
+        "token_type": "bearer",
     }
 
 
 @app.post(
     "/api/auth/login",
-    response_model=Token
+    response_model=Token,
 )
 def login(
     data: LoginIn,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-
     email = data.email.lower().strip()
 
     user = (
@@ -180,47 +229,65 @@ def login(
     )
 
     if not user:
-
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Invalid email or password",
         )
 
     if not verify_password(
         data.password,
-        user.password_hash
+        user.password_hash,
     ):
-
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Invalid email or password",
         )
 
     return {
         "access_token": make_token(user.id),
-        "token_type": "bearer"
+        "token_type": "bearer",
     }
 
 
 @app.get(
     "/api/auth/me",
-    response_model=UserOut
+    response_model=UserOut,
 )
 def me(
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
-
     return user
 
 
+# =========================================================
+# PROPERTIES
+# =========================================================
+
 @app.get(
     "/api/properties",
-    response_model=list[PropertyOut]
+    response_model=list[PropertyOut],
 )
 def properties(
     db: Session = Depends(get_db),
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
+    """
+    Customer -> sees every available property.
+
+    Owner -> sees only their own properties.
+
+    Admin -> sees every property.
+    """
+
+    if user.role == "owner":
+        return (
+            db.query(Property)
+            .filter(
+                Property.owner_id == user.id
+            )
+            .order_by(Property.name)
+            .all()
+        )
 
     return (
         db.query(Property)
@@ -231,45 +298,114 @@ def properties(
 
 @app.post(
     "/api/properties",
-    response_model=PropertyOut
+    response_model=PropertyOut,
 )
 def create_property(
     data: PropertyIn,
     db: Session = Depends(get_db),
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
-
-    if user.role not in {
-        "admin",
-        "owner"
-    }:
-
+    if user.role not in {"owner", "admin"}:
         raise HTTPException(
             status_code=403,
-            detail="Only property owners and admins can create properties"
+            detail="Only owners and admins can create properties",
         )
 
-    p = Property(
-        **data.model_dump()
+    # Convert the Pydantic model to a dictionary.
+    # This includes contact_phone.
+    property_data = data.model_dump()
+
+    # The backend determines the owner.
+    # The frontend cannot choose another owner.
+    property_data["owner_id"] = user.id
+
+    property_obj = Property(
+        **property_data
     )
 
-    db.add(p)
+    db.add(property_obj)
     db.commit()
-    db.refresh(p)
+    db.refresh(property_obj)
 
-    return p
+    return property_obj
 
+
+@app.delete(
+    "/api/properties/{property_id}"
+)
+def delete_property(
+    property_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(current_user),
+):
+    property_obj = db.get(
+        Property,
+        property_id,
+    )
+
+    if not property_obj:
+        raise HTTPException(
+            status_code=404,
+            detail="Property not found",
+        )
+
+    if (
+        user.role != "admin"
+        and property_obj.owner_id != user.id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only manage your own properties",
+        )
+
+    db.delete(property_obj)
+    db.commit()
+
+    return {"ok": True}
+
+
+# =========================================================
+# BOOKINGS
+# =========================================================
 
 @app.get(
     "/api/bookings",
-    response_model=list[BookingOut]
+    response_model=list[BookingOut],
 )
 def bookings(
     db: Session = Depends(get_db),
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
+    """
+    Customer -> only their own bookings.
+
+    Owner -> bookings belonging to their properties.
+
+    Admin -> all bookings.
+    """
 
     expire_pending(db)
+
+    if user.role == "customer":
+        return (
+            db.query(Booking)
+            .filter(
+                Booking.customer_id == user.id
+            )
+            .order_by(Booking.start_at)
+            .all()
+        )
+
+    if user.role == "owner":
+        return (
+            db.query(Booking)
+            .join(Property)
+            .filter(
+                Property.owner_id == user.id
+            )
+            .order_by(Booking.start_at)
+            .all()
+        )
 
     return (
         db.query(Booking)
@@ -280,71 +416,88 @@ def bookings(
 
 @app.post(
     "/api/bookings",
-    response_model=BookingOut
+    response_model=BookingOut,
 )
 def create_booking(
     data: BookingIn,
     db: Session = Depends(get_db),
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
+    if user.role != "customer":
+        raise HTTPException(
+            status_code=403,
+            detail="Only customers can create bookings",
+        )
 
     expire_pending(db)
 
     if data.end_at <= data.start_at:
-
         raise HTTPException(
             status_code=400,
-            detail="End time must be after start time"
+            detail="End time must be after start time",
         )
 
     if data.deposit_amount > data.total_amount:
-
         raise HTTPException(
             status_code=400,
-            detail="Deposit cannot exceed total amount"
+            detail="Deposit cannot exceed total amount",
         )
 
-    if not db.get(
+    property_obj = db.get(
         Property,
-        data.property_id
-    ):
+        data.property_id,
+    )
 
+    if not property_obj:
         raise HTTPException(
             status_code=404,
-            detail="Property not found"
+            detail="Property not found",
         )
 
     conflict = (
         db.query(Booking)
         .filter(
-            Booking.property_id
-            == data.property_id,
-
-            Booking.status.in_(
-                [
-                    "confirmed",
-                    "pending"
-                ]
-            ),
-
-            Booking.start_at
-            < data.end_at,
-
-            Booking.end_at
-            > data.start_at
+            Booking.property_id == data.property_id,
+            Booking.status.in_([
+                "confirmed",
+                "pending",
+            ]),
+            Booking.start_at < data.end_at,
+            Booking.end_at > data.start_at,
         )
         .first()
     )
 
     if conflict:
-
         raise HTTPException(
             status_code=409,
-            detail="This property is already booked for the selected time"
+            detail=(
+                "This property is already booked "
+                "for the selected time"
+            ),
         )
 
     booking = Booking(
-        **data.model_dump()
+        property_id=data.property_id,
+
+        # IMPORTANT:
+        # The backend gets the customer ID
+        # from the authenticated account.
+        customer_id=user.id,
+
+        customer_name=user.email,
+
+        customer_phone=data.customer_phone,
+
+        start_at=data.start_at,
+        end_at=data.end_at,
+
+        total_amount=data.total_amount,
+        deposit_amount=data.deposit_amount,
+
+        status=data.status,
+        expires_at=data.expires_at,
+        notes=data.notes,
     )
 
     db.add(booking)
@@ -361,61 +514,135 @@ def update_status(
     booking_id: int,
     status: str,
     db: Session = Depends(get_db),
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
-
     if status not in {
         "confirmed",
         "cancelled",
-        "pending"
+        "pending",
     }:
-
         raise HTTPException(
             status_code=400,
-            detail="Invalid status"
+            detail="Invalid status",
         )
 
     booking = db.get(
         Booking,
-        booking_id
+        booking_id,
     )
 
     if not booking:
-
         raise HTTPException(
             status_code=404,
-            detail="Booking not found"
+            detail="Booking not found",
+        )
+
+    property_obj = db.get(
+        Property,
+        booking.property_id,
+    )
+
+    # Admin can manage everything.
+    if user.role == "admin":
+        pass
+
+    # Owner can manage bookings for their properties.
+    elif (
+        user.role == "owner"
+        and property_obj
+        and property_obj.owner_id == user.id
+    ):
+        pass
+
+    # Customer can only cancel their own booking.
+    elif (
+        user.role == "customer"
+        and booking.customer_id == user.id
+        and status == "cancelled"
+    ):
+        pass
+
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot manage this booking",
         )
 
     booking.status = status
 
     db.commit()
 
-    return {
-        "ok": True
-    }
+    return {"ok": True}
 
+
+# =========================================================
+# DASHBOARD
+# =========================================================
 
 @app.get("/api/dashboard")
 def dashboard(
     db: Session = Depends(get_db),
-    user=Depends(current_user)
+    user=Depends(current_user),
 ):
-
     expire_pending(db)
 
-    rows = (
-        db.query(Booking)
-        .filter(
-            Booking.status.in_(
-                [
+    if user.role == "owner":
+
+        rows = (
+            db.query(Booking)
+            .join(Property)
+            .filter(
+                Property.owner_id == user.id,
+                Booking.status.in_([
                     "confirmed",
-                    "pending"
-                ]
+                    "pending",
+                ]),
             )
+            .all()
         )
-        .all()
-    )
+
+        property_count = (
+            db.query(Property)
+            .filter(
+                Property.owner_id == user.id
+            )
+            .count()
+        )
+
+    elif user.role == "customer":
+
+        rows = (
+            db.query(Booking)
+            .filter(
+                Booking.customer_id == user.id,
+                Booking.status.in_([
+                    "confirmed",
+                    "pending",
+                ]),
+            )
+            .all()
+        )
+
+        property_count = (
+            db.query(Property).count()
+        )
+
+    else:
+
+        rows = (
+            db.query(Booking)
+            .filter(
+                Booking.status.in_([
+                    "confirmed",
+                    "pending",
+                ])
+            )
+            .all()
+        )
+
+        property_count = (
+            db.query(Property).count()
+        )
 
     total = Decimal("0")
     deposits = Decimal("0")
@@ -424,39 +651,33 @@ def dashboard(
 
         total += Decimal(
             str(
-                booking.total_amount
-                or 0
+                booking.total_amount or 0
             )
         )
 
         deposits += Decimal(
             str(
-                booking.deposit_amount
-                or 0
+                booking.deposit_amount or 0
             )
         )
 
     return {
-        "properties":
-            db.query(Property).count(),
-
-        "active_bookings":
-            len(rows),
-
-        "revenue":
-            float(total),
-
-        "deposits":
-            float(deposits),
-
-        "outstanding":
-            float(total - deposits)
+        "properties": property_count,
+        "active_bookings": len(rows),
+        "revenue": float(total),
+        "deposits": float(deposits),
+        "outstanding": float(
+            total - deposits
+        ),
     }
 
 
+# =========================================================
+# FRONTEND
+# =========================================================
+
 @app.get("/")
 def home():
-
     return FileResponse(
         "frontend/index.html"
     )
